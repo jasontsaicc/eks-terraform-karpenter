@@ -98,14 +98,15 @@ resource "aws_iam_role_policy" "node_autoscaling" {
 
 # OIDC Provider for IRSA
 data "tls_certificate" "eks" {
+  count = var.cluster_oidc_issuer_url != "" ? 1 : 0
   url = var.cluster_oidc_issuer_url
 }
 
 resource "aws_iam_openid_connect_provider" "eks" {
-  count = var.enable_irsa ? 1 : 0
+  count = var.enable_irsa && var.cluster_oidc_issuer_url != "" ? 1 : 0
 
   client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.eks.certificates[0].sha1_fingerprint]
+  thumbprint_list = [data.tls_certificate.eks[0].certificates[0].sha1_fingerprint]
   url             = var.cluster_oidc_issuer_url
 
   tags = merge(
@@ -118,7 +119,7 @@ resource "aws_iam_openid_connect_provider" "eks" {
 
 # Karpenter Controller IAM Role (IRSA)
 resource "aws_iam_role" "karpenter_controller" {
-  count = var.enable_karpenter ? 1 : 0
+  count = var.enable_karpenter && var.cluster_oidc_issuer_url != "" ? 1 : 0
   
   name = "${var.cluster_name}-karpenter-controller"
 
@@ -244,7 +245,7 @@ resource "aws_iam_role_policy_attachment" "karpenter_node_ssm" {
 
 # AWS Load Balancer Controller IAM Role (IRSA)
 resource "aws_iam_role" "aws_load_balancer_controller" {
-  count = var.enable_aws_load_balancer_controller ? 1 : 0
+  count = var.enable_aws_load_balancer_controller && var.cluster_oidc_issuer_url != "" ? 1 : 0
   
   name = "${var.cluster_name}-aws-load-balancer-controller"
 
@@ -272,7 +273,7 @@ resource "aws_iam_role" "aws_load_balancer_controller" {
 
 # AWS Load Balancer Controller Policy
 resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
-  count = var.enable_aws_load_balancer_controller ? 1 : 0
+  count = var.enable_aws_load_balancer_controller && var.cluster_oidc_issuer_url != "" ? 1 : 0
   
   policy_arn = "arn:aws:iam::aws:policy/ElasticLoadBalancingFullAccess"
   role       = aws_iam_role.aws_load_balancer_controller[0].name
@@ -280,7 +281,7 @@ resource "aws_iam_role_policy_attachment" "aws_load_balancer_controller" {
 
 # EBS CSI Driver IAM Role (IRSA)
 resource "aws_iam_role" "ebs_csi_driver" {
-  count = var.enable_ebs_csi_driver ? 1 : 0
+  count = var.enable_ebs_csi_driver && var.cluster_oidc_issuer_url != "" ? 1 : 0
   
   name = "${var.cluster_name}-ebs-csi-driver"
 
@@ -308,7 +309,7 @@ resource "aws_iam_role" "ebs_csi_driver" {
 
 # EBS CSI Driver Policy
 resource "aws_iam_role_policy_attachment" "ebs_csi_driver" {
-  count = var.enable_ebs_csi_driver ? 1 : 0
+  count = var.enable_ebs_csi_driver && var.cluster_oidc_issuer_url != "" ? 1 : 0
   
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"
   role       = aws_iam_role.ebs_csi_driver[0].name

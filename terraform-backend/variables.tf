@@ -9,7 +9,7 @@ variable "project_name" {
 variable "region" {
   description = "AWS 區域"
   type        = string
-  default     = "ap-east-2"
+  default     = "ap-southeast-1"
 }
 
 variable "force_destroy_bucket" {

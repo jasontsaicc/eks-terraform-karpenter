@@ -1,0 +1,60 @@
+# Terraform
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+terraform.tfplan
+terraform.tfplan.json
+tfplan
+*.auto.tfvars
+
+# AWS
+.aws/
+aws-auth-cm.yaml
+
+# Kubernetes
+kubeconfig*
+*.kubeconfig
+
+# IDE/Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+tmp/
+temp/
+.tmp/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Backup files
+*.backup
+*.bak
+
+# Cache
+.cache/
+node_modules/
+
+# Sensitive information
+secrets/
+*.pem
+*.key
+*.crt
+*.p12
+
+# Evidence/forensics
+evidence/

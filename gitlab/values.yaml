@@ -1,0 +1,221 @@
+# GitLab Helm Values
+# Author: jasontsai
+# Repository: https://github.com/jasontsaicc/eks-terraform-karpenter
+
+global:
+  edition: ce
+  hosts:
+    domain: example.com
+    https: true
+    gitlab:
+      name: gitlab.example.com
+      https: true
+    registry:
+      name: registry.example.com
+      https: true
+    minio:
+      name: minio.example.com
+      https: true
+  
+  ingress:
+    class: alb
+    enabled: true
+    annotations:
+      alb.ingress.kubernetes.io/scheme: internet-facing
+      alb.ingress.kubernetes.io/target-type: ip
+      alb.ingress.kubernetes.io/listen-ports: '[{"HTTP": 80}, {"HTTPS": 443}]'
+      alb.ingress.kubernetes.io/ssl-redirect: "443"
+      alb.ingress.kubernetes.io/certificate-arn: "arn:aws:acm:ap-northeast-1:ACCOUNT_ID:certificate/CERT_ID"
+      alb.ingress.kubernetes.io/group.name: gitlab
+      alb.ingress.kubernetes.io/healthcheck-path: /
+    tls:
+      enabled: true
+      secretName: gitlab-tls
+  
+  psql:
+    password:
+      secret: gitlab-postgresql-password
+      key: password
+    host: gitlab-postgresql
+    port: 5432
+    username: gitlab
+    database: gitlab_production
+  
+  redis:
+    host: gitlab-redis-master
+    port: 6379
+    password:
+      secret: gitlab-redis-password
+      key: password
+  
+  gitaly:
+    enabled: true
+    internal:
+      names: ["default"]
+    external: []
+    authToken:
+      secret: gitlab-gitaly-secret
+      key: token
+  
+  minio:
+    enabled: false
+  
+  registry:
+    enabled: true
+    
+  appConfig:
+    enableUsagePing: false
+    enableSeatLink: false
+    enableImpersonation: true
+    defaultProjectsFeatures:
+      issues: true
+      mergeRequests: true
+      wiki: true
+      snippets: true
+      builds: true
+      containerRegistry: true
+    
+    omniauth:
+      enabled: false
+      
+    ldap:
+      enabled: false
+      
+  time_zone: Asia/Tokyo
+  
+  antiAffinity: soft
+
+certmanager:
+  install: false
+  
+nginx-ingress:
+  enabled: false
+  
+prometheus:
+  install: false
+  
+redis:
+  install: true
+  auth:
+    enabled: true
+    password: "changeme"
+  architecture: replication
+  master:
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: gp3
+  replica:
+    replicaCount: 2
+    persistence:
+      enabled: true
+      size: 8Gi
+      storageClass: gp3
+      
+postgresql:
+  install: true
+  auth:
+    database: gitlab_production
+    username: gitlab
+    password: "changeme"
+  primary:
+    persistence:
+      enabled: true
+      size: 20Gi
+      storageClass: gp3
+  metrics:
+    enabled: true
+    
+gitlab:
+  webservice:
+    minReplicas: 2
+    maxReplicas: 5
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    nodeSelector:
+      role: general
+      
+  sidekiq:
+    minReplicas: 1
+    maxReplicas: 3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    nodeSelector:
+      role: general
+      
+  gitaly:
+    persistence:
+      enabled: true
+      size: 50Gi
+      storageClass: gp3
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+    nodeSelector:
+      role: general
+      
+  gitlab-shell:
+    minReplicas: 2
+    maxReplicas: 5
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    nodeSelector:
+      role: general
+      
+registry:
+  enabled: true
+  storage:
+    secret: registry-storage
+    key: config
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  nodeSelector:
+    role: general
+    
+gitlab-runner:
+  install: true
+  rbac:
+    create: true
+  runners:
+    config: |
+      [[runners]]
+        [runners.kubernetes]
+          namespace = "{{.Release.Namespace}}"
+          image = "alpine:latest"
+          privileged = true
+          cpu_request = "100m"
+          memory_request = "128Mi"
+          cpu_limit = "1"
+          memory_limit = "1Gi"
+          service_cpu_request = "100m"
+          service_memory_request = "128Mi"
+          helper_cpu_request = "100m"
+          helper_memory_request = "128Mi"
+          [runners.kubernetes.node_selector]
+            "node-type" = "spot"
+          [runners.kubernetes.node_tolerations]
+            "spot=true" = "NoSchedule"

@@ -1,0 +1,60 @@
+# Karpenter Helm Values
+# Author: jasontsai
+# Repository: https://github.com/jasontsaicc/eks-terraform-karpenter
+
+replicas: 2
+
+image:
+  repository: public.ecr.aws/karpenter/karpenter
+  tag: v0.35.0
+
+serviceAccount:
+  create: true
+  name: karpenter
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/karpenter-controller"
+
+settings:
+  clusterName: eks-test-test-eks
+  interruptionQueue: eks-test-test-eks-karpenter
+  featureGates:
+    driftEnabled: true
+    spotToSpotConsolidation: true
+
+controller:
+  resources:
+    requests:
+      cpu: 1
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+webhook:
+  enabled: true
+  port: 8443
+
+logLevel: info
+
+affinity:
+  podAntiAffinity:
+    requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: karpenter
+        topologyKey: kubernetes.io/hostname
+
+nodeSelector:
+  role: general
+
+tolerations:
+  - key: system
+    operator: Equal
+    value: "true"
+    effect: NoSchedule
+
+serviceMonitor:
+  enabled: true
+  namespace: karpenter
+  interval: 30s
+  scrapeTimeout: 10s

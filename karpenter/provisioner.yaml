@@ -1,0 +1,251 @@
+# Karpenter Provisioner 配置
+# 作者: jasontsai
+# 用途: 定義節點自動擴展策略
+
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: general-purpose
+  namespace: karpenter
+spec:
+  # 節點範本參考
+  template:
+    metadata:
+      labels:
+        karpenter.sh/pool: general-purpose
+        node.kubernetes.io/lifecycle: spot
+      annotations:
+        karpenter.sh/do-not-disrupt: "false"
+    spec:
+      # 需求配置
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values:
+            # 通用實例類型（成本優化）
+            - t3.small
+            - t3.medium
+            - t3.large
+            - t3a.small
+            - t3a.medium
+            - t3a.large
+            # 計算優化實例
+            - c5.large
+            - c5.xlarge
+            - c5a.large
+            - c5a.xlarge
+            # 記憶體優化實例
+            - r5.large
+            - r5.xlarge
+            - r5a.large
+            - r5a.xlarge
+        - key: karpenter.k8s.aws/instance-category
+          operator: NotIn
+          values: ["gpu", "fpga"]
+        - key: karpenter.k8s.aws/instance-generation
+          operator: Gt
+          values: ["2"]
+      
+      # 節點屬性
+      nodeClassRef:
+        apiVersion: karpenter.k8s.aws/v1beta1
+        kind: EC2NodeClass
+        name: default
+      
+      # 污點配置
+      taints:
+        - key: karpenter.sh/pool
+          value: general-purpose
+          effect: NoSchedule
+      
+      # 啟動腳本
+      startupTaints:
+        - key: node.cloudprovider.kubernetes.io/uninitialized
+          value: "true"
+          effect: NoSchedule
+  
+  # 擴展限制
+  limits:
+    cpu: "1000"
+    memory: "1000Gi"
+  
+  # 中斷處理
+  disruption:
+    # 合併策略
+    consolidationPolicy: WhenUnderutilized
+    # 節點過期時間
+    expireAfter: 30m
+    # 合併後等待時間
+    consolidateAfter: 30s
+
+---
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: spot-only
+  namespace: karpenter
+spec:
+  template:
+    metadata:
+      labels:
+        karpenter.sh/pool: spot-only
+        node.kubernetes.io/lifecycle: spot
+        workload-type: batch
+    spec:
+      requirements:
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values:
+            - t3.small
+            - t3.medium
+            - t3a.small
+            - t3a.medium
+            - t2.small
+            - t2.medium
+      
+      nodeClassRef:
+        apiVersion: karpenter.k8s.aws/v1beta1
+        kind: EC2NodeClass
+        name: spot
+      
+      taints:
+        - key: spot
+          value: "true"
+          effect: NoSchedule
+        - key: workload-type
+          value: batch
+          effect: NoSchedule
+  
+  limits:
+    cpu: "500"
+    memory: "500Gi"
+  
+  disruption:
+    consolidationPolicy: WhenEmpty
+    expireAfter: 5m
+    consolidateAfter: 60s
+
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: default
+  namespace: karpenter
+spec:
+  # AMI 選擇
+  amiFamily: AL2
+  
+  # 子網選擇
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "eks-test-test-eks"
+        kubernetes.io/cluster/eks-test-test-eks: "owned"
+  
+  # 安全群組選擇
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "eks-test-test-eks"
+        kubernetes.io/cluster/eks-test-test-eks: "owned"
+  
+  # IAM 實例配置檔
+  instanceProfile: "KarpenterNodeInstanceProfile"
+  
+  # 實例存儲配置
+  instanceStorePolicy: RAID0
+  
+  # 根設備配置
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: "100Gi"
+        volumeType: "gp3"
+        iops: 3000
+        throughput: 125
+        deleteOnTermination: true
+        encrypted: true
+  
+  # 詳細監控
+  detailedMonitoring: true
+  
+  # 使用者資料
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-test-test-eks
+    
+    # 設定 kubelet 參數
+    echo "KUBELET_EXTRA_ARGS=--max-pods=110" >> /etc/sysconfig/kubelet
+    
+    # 安裝 SSM Agent
+    yum install -y amazon-ssm-agent
+    systemctl enable amazon-ssm-agent
+    systemctl start amazon-ssm-agent
+    
+    # 設定日誌輪轉
+    cat <<EOF > /etc/logrotate.d/karpenter
+    /var/log/messages {
+        size 100M
+        rotate 5
+        compress
+        delaycompress
+        missingok
+        notifempty
+    }
+    EOF
+    
+    # 優化網路設定
+    echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+    echo "net.bridge.bridge-nf-call-iptables = 1" >> /etc/sysctl.conf
+    sysctl -p
+  
+  # 標籤
+  tags:
+    Environment: test
+    ManagedBy: Karpenter
+    Pool: general-purpose
+
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: spot
+  namespace: karpenter
+spec:
+  amiFamily: AL2
+  
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "eks-test-test-eks"
+  
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: "eks-test-test-eks"
+  
+  instanceProfile: "KarpenterNodeInstanceProfile"
+  
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: "50Gi"
+        volumeType: "gp3"
+        deleteOnTermination: true
+        encrypted: true
+  
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-test-test-eks
+    echo "KUBELET_EXTRA_ARGS=--max-pods=58" >> /etc/sysconfig/kubelet
+  
+  tags:
+    Environment: test
+    ManagedBy: Karpenter
+    Pool: spot-only
+    Lifecycle: spot

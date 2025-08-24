@@ -1,0 +1,133 @@
+# AWS Load Balancer Controller Helm Values
+# Author: jasontsai
+# Repository: https://github.com/jasontsaicc/eks-terraform-karpenter
+
+replicaCount: 2
+
+image:
+  repository: public.ecr.aws/eks/aws-load-balancer-controller
+  tag: v2.7.1
+  pullPolicy: IfNotPresent
+
+clusterName: eks-test-test-eks
+
+serviceAccount:
+  create: true
+  name: aws-load-balancer-controller
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT_ID:role/aws-load-balancer-controller"
+
+region: ap-northeast-1
+vpcId: vpc-xxxxxxxxx
+
+# Enable webhook
+webhookInstallCertManager: false
+enableCertManager: false
+
+# Security context
+securityContext:
+  runAsNonRoot: true
+  fsGroup: 65534
+
+podSecurityContext:
+  runAsUser: 65534
+  runAsGroup: 65534
+  fsGroup: 65534
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# High availability
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - aws-load-balancer-controller
+        topologyKey: kubernetes.io/hostname
+
+# Node selector for system nodes
+nodeSelector:
+  role: general
+
+tolerations: []
+
+# Monitoring
+metrics:
+  enabled: true
+  port: 8080
+
+# Feature gates
+additionalAnnotations: {}
+
+# Default IngressClass
+ingressClass: alb
+createIngressClassResource: true
+defaultIngressClass: true
+
+# TargetGroupBinding
+enableTargetGroupBinding: true
+
+# Log level
+logLevel: info
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 9443
+
+# Pod disruption budget
+podDisruptionBudget:
+  maxUnavailable: 1
+
+# Update strategy
+updateStrategy:
+  type: RollingUpdate
+  rollingUpdate:
+    maxSurge: 1
+    maxUnavailable: 1
+
+# Health probes
+livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 61779
+  initialDelaySeconds: 30
+  timeoutSeconds: 10
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /readyz
+    port: 61779
+  initialDelaySeconds: 10
+  timeoutSeconds: 10
+  periodSeconds: 10
+  successThreshold: 1
+  failureThreshold: 3
+
+# HPA
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+
+# Service Monitor for Prometheus
+serviceMonitor:
+  enabled: true
+  namespace: kube-system
+  interval: 30s
+  scrapeTimeout: 10s

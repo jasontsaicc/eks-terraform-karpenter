@@ -1,0 +1,299 @@
+# ArgoCD Applications 配置
+# 作者: jasontsai
+# 用途: 定義所有 GitOps 管理的應用程式
+
+---
+# App of Apps Pattern
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: infrastructure
+  namespace: argocd
+spec:
+  description: 基礎設施應用程式專案
+  
+  sourceRepos:
+    - 'https://github.com/jasontsaicc/eks-terraform-karpenter.git'
+    - 'https://aws.github.io/eks-charts'
+    - 'https://kubernetes-sigs.github.io/metrics-server'
+    - 'https://kubernetes.github.io/autoscaler'
+    - 'https://karpenter.sh/charts'
+    - 'https://charts.gitlab.io'
+    - 'https://prometheus-community.github.io/helm-charts'
+    - 'https://grafana.github.io/helm-charts'
+  
+  destinations:
+    - namespace: '*'
+      server: 'https://kubernetes.default.svc'
+  
+  clusterResourceWhitelist:
+    - group: '*'
+      kind: '*'
+  
+  namespaceResourceWhitelist:
+    - group: '*'
+      kind: '*'
+
+---
+# AWS Load Balancer Controller
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  
+  source:
+    repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+    targetRevision: main
+    path: aws-load-balancer-controller
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+      allowEmpty: false
+    syncOptions:
+      - CreateNamespace=true
+      - PrunePropagationPolicy=foreground
+      - PruneLast=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+  
+  revisionHistoryLimit: 10
+
+---
+# Karpenter
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  
+  source:
+    repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+    targetRevision: main
+    path: karpenter
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: karpenter
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+# GitLab
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitlab
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  
+  source:
+    repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+    targetRevision: main
+    path: gitlab
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitlab
+  
+  syncPolicy:
+    automated:
+      prune: false  # GitLab 資料需謹慎處理
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+    retry:
+      limit: 3
+      backoff:
+        duration: 10s
+        factor: 2
+        maxDuration: 5m
+
+---
+# GitLab Runner
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitlab-runner
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  
+  source:
+    repoURL: https://charts.gitlab.io
+    chart: gitlab-runner
+    targetRevision: 0.64.0
+    helm:
+      valueFiles:
+        - values.yaml
+      values: |
+        gitlabUrl: https://gitlab.example.com
+        runnerRegistrationToken: "CHANGE-ME"
+        concurrent: 10
+        rbac:
+          create: true
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitlab-runner
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+
+---
+# Monitoring Stack (Prometheus + Grafana)
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: infrastructure
+  
+  source:
+    repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+    targetRevision: main
+    path: monitoring
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+
+---
+# ApplicationSet for Environments
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: environments
+  namespace: argocd
+spec:
+  generators:
+    - list:
+        elements:
+          - env: dev
+            namespace: dev
+            cluster: https://kubernetes.default.svc
+          - env: staging
+            namespace: staging
+            cluster: https://kubernetes.default.svc
+          - env: prod
+            namespace: prod
+            cluster: https://kubernetes.default.svc
+  
+  template:
+    metadata:
+      name: '{{env}}-apps'
+    spec:
+      project: default
+      
+      source:
+        repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+        targetRevision: main
+        path: 'gitops-apps/{{env}}'
+      
+      destination:
+        server: '{{cluster}}'
+        namespace: '{{namespace}}'
+      
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+          allowEmpty: false
+        syncOptions:
+          - CreateNamespace=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m
+
+---
+# Secret Management with External Secrets Operator
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: external-secrets
+  namespace: argocd
+spec:
+  project: infrastructure
+  
+  source:
+    repoURL: https://charts.external-secrets.io
+    chart: external-secrets
+    targetRevision: 0.9.13
+    helm:
+      values: |
+        installCRDs: true
+        replicaCount: 2
+        resources:
+          requests:
+            cpu: 100m
+            memory: 128Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        serviceMonitor:
+          enabled: true
+  
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: external-secrets
+  
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true

@@ -1,0 +1,223 @@
+# Platform Applications for ArgoCD
+# Author: jasontsai
+# Repository: https://github.com/jasontsaicc/eks-terraform-karpenter
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: aws-load-balancer-controller
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://aws.github.io/eks-charts
+    targetRevision: 1.7.1
+    chart: aws-load-balancer-controller
+    helm:
+      values: |
+        clusterName: eks-test-test-eks
+        serviceAccount:
+          create: true
+          annotations:
+            eks.amazonaws.com/role-arn: ${AWS_LOAD_BALANCER_CONTROLLER_ROLE_ARN}
+        region: ap-northeast-1
+        vpcId: ${VPC_ID}
+        replicaCount: 2
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: kube-system
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=false
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: karpenter
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  sources:
+    - repoURL: https://karpenter.sh/charts
+      targetRevision: 0.35.0
+      chart: karpenter
+      helm:
+        values: |
+          replicas: 2
+          serviceAccount:
+            annotations:
+              eks.amazonaws.com/role-arn: ${KARPENTER_CONTROLLER_ROLE_ARN}
+          settings:
+            clusterName: eks-test-test-eks
+            interruptionQueue: eks-test-test-eks-karpenter
+            featureGates:
+              driftEnabled: true
+              spotToSpotConsolidation: true
+    - repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+      targetRevision: HEAD
+      path: karpenter
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: karpenter
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: gitlab
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://charts.gitlab.io
+    targetRevision: 7.11.0
+    chart: gitlab
+    helm:
+      valuesFiles:
+      - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: gitlab
+  syncPolicy:
+    automated:
+      prune: false  # GitLab 資料重要，不自動刪除
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: monitoring-stack
+  namespace: argocd
+  finalizers:
+    - resources-finalizer.argocd.argoproj.io
+spec:
+  project: platform
+  source:
+    repoURL: https://prometheus-community.github.io/helm-charts
+    targetRevision: 58.7.2
+    chart: kube-prometheus-stack
+    helm:
+      values: |
+        prometheus:
+          prometheusSpec:
+            retention: 30d
+            storageSpec:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 50Gi
+        grafana:
+          adminPassword: changeme
+          persistence:
+            enabled: true
+            storageClassName: gp3
+            size: 10Gi
+        alertmanager:
+          alertmanagerSpec:
+            storage:
+              volumeClaimTemplate:
+                spec:
+                  storageClassName: gp3
+                  accessModes: ["ReadWriteOnce"]
+                  resources:
+                    requests:
+                      storage: 10Gi
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: monitoring
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true
+    - ServerSideApply=true
+    retry:
+      limit: 5
+      backoff:
+        duration: 5s
+        factor: 2
+        maxDuration: 3m
+
+---
+apiVersion: argoproj.io/v1alpha1
+kind: ApplicationSet
+metadata:
+  name: environments
+  namespace: argocd
+spec:
+  generators:
+  - list:
+      elements:
+      - env: dev
+        namespace: dev
+      - env: staging
+        namespace: staging
+      - env: prod
+        namespace: production
+  template:
+    metadata:
+      name: '{{env}}-apps'
+    spec:
+      project: platform
+      source:
+        repoURL: https://github.com/jasontsaicc/eks-terraform-karpenter.git
+        targetRevision: HEAD
+        path: 'gitops-apps/{{env}}'
+      destination:
+        server: https://kubernetes.default.svc
+        namespace: '{{namespace}}'
+      syncPolicy:
+        automated:
+          prune: true
+          selfHeal: true
+        syncOptions:
+        - CreateNamespace=true
+        retry:
+          limit: 5
+          backoff:
+            duration: 5s
+            factor: 2
+            maxDuration: 3m

@@ -1,0 +1,184 @@
+# GitLab Runner Helm Chart Values
+# 作者: jasontsai
+# 用途: GitLab Runner 配置（支援 Kubernetes Executor）
+
+gitlabUrl: https://gitlab.example.com
+runnerRegistrationToken: "REGISTRATION_TOKEN"
+
+# 並發設定
+concurrent: 10
+checkInterval: 30
+
+# Runner 配置
+runners:
+  config: |
+    [[runners]]
+      [runners.kubernetes]
+        namespace = "gitlab-runner"
+        image = "alpine:latest"
+        privileged = true
+        
+        # CPU 和記憶體限制
+        cpu_request = "100m"
+        cpu_limit = "1"
+        memory_request = "128Mi"
+        memory_limit = "1Gi"
+        
+        # Helper 映像
+        helper_image = "gitlab/gitlab-runner-helper:x86_64-latest"
+        
+        # 節點選擇
+        [runners.kubernetes.node_selector]
+          "kubernetes.io/lifecycle" = "spot"
+          "workload-type" = "ci"
+        
+        # 節點容忍
+        [runners.kubernetes.node_tolerations]
+          "spot=true" = "NoSchedule"
+          "workload-type=ci" = "NoSchedule"
+        
+        # Pod 標籤
+        [runners.kubernetes.pod_labels]
+          "app" = "gitlab-runner"
+          "type" = "ci-job"
+        
+        # Pod 註解
+        [runners.kubernetes.pod_annotations]
+          "cluster-autoscaler.kubernetes.io/safe-to-evict" = "true"
+        
+        # 服務帳戶
+        service_account = "gitlab-runner"
+        
+        # 拉取策略
+        pull_policy = ["always", "if-not-present"]
+        
+        # 允許的映像
+        allowed_images = ["alpine:*", "ubuntu:*", "docker:*", "node:*", "python:*", "golang:*", "maven:*", "gradle:*"]
+        
+        # Volume 配置
+        [[runners.kubernetes.volumes.empty_dir]]
+          name = "docker-sock"
+          mount_path = "/var/run/docker.sock"
+          read_only = false
+        
+        [[runners.kubernetes.volumes.config_map]]
+          name = "gitlab-runner-scripts"
+          mount_path = "/scripts"
+          read_only = true
+        
+        [[runners.kubernetes.volumes.pvc]]
+          name = "cache"
+          mount_path = "/cache"
+          read_only = false
+      
+      # Cache 配置
+      [runners.cache]
+        Type = "s3"
+        Shared = true
+        [runners.cache.s3]
+          ServerAddress = "s3.amazonaws.com"
+          BucketName = "gitlab-runner-cache"
+          BucketLocation = "ap-southeast-1"
+          Insecure = false
+      
+      # 機器選項
+      [runners.machine]
+        IdleCount = 2
+        IdleTime = 1800
+        MaxBuilds = 100
+        MachineDriver = "amazonec2"
+        MachineName = "gitlab-runner-%s"
+        
+        # AWS EC2 配置
+        MachineOptions = [
+          "amazonec2-instance-type=t3.medium",
+          "amazonec2-region=ap-southeast-1",
+          "amazonec2-zone=a",
+          "amazonec2-vpc-id=vpc-xxxxx",
+          "amazonec2-subnet-id=subnet-xxxxx",
+          "amazonec2-use-private-address=true",
+          "amazonec2-tags=runner-manager-name,gitlab-aws-autoscaler,gitlab,true,gitlab-runner-autoscale,true",
+          "amazonec2-security-group=gitlab-runner",
+          "amazonec2-instance-type=t3.medium",
+          "amazonec2-request-spot-instance=true",
+          "amazonec2-spot-price=0.05"
+        ]
+
+# RBAC 配置
+rbac:
+  create: true
+  rules:
+    - apiGroups: [""]
+      resources: ["pods", "pods/exec", "pods/log", "pods/attach"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    - apiGroups: [""]
+      resources: ["secrets", "configmaps"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    - apiGroups: [""]
+      resources: ["services"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+    - apiGroups: ["batch"]
+      resources: ["jobs"]
+      verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# 資源配置
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi
+
+# 節點選擇
+nodeSelector:
+  role: general
+
+# HPA 配置
+hpa:
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+
+# Pod 安全性
+podSecurityContext:
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+  runAsNonRoot: true
+
+# 容器安全性
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+      - ALL
+
+# 服務帳戶
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: "arn:aws:iam::ACCOUNT:role/GitLabRunnerRole"
+
+# 持久化配置
+cache:
+  enabled: true
+  storageClass: gp3
+  accessMode: ReadWriteOnce
+  size: 50Gi
+
+# 監控配置
+metrics:
+  enabled: true
+  port: 9252
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+
+# 日誌配置
+logging:
+  level: info
+  format: json

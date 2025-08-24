@@ -1,0 +1,224 @@
+# Karpenter Node Provisioners
+# Author: jasontsai
+# Repository: https://github.com/jasontsaicc/eks-terraform-karpenter
+
+---
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: general-purpose
+  namespace: karpenter
+spec:
+  # Template for nodes
+  template:
+    metadata:
+      labels:
+        karpenter.sh/nodepool: general-purpose
+        node-type: general
+      annotations:
+        node.alpha.kubernetes.io/ttl: "86400" # 1 day
+    spec:
+      requirements:
+        # Instance types
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot", "on-demand"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: 
+            - t3.medium
+            - t3.large
+            - t3.xlarge
+            - t3a.medium
+            - t3a.large
+            - t3a.xlarge
+            - c5.large
+            - c5.xlarge
+            - c5a.large
+            - c5a.xlarge
+            - m5.large
+            - m5.xlarge
+            - m5a.large
+            - m5a.xlarge
+        # Architecture
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        # Availability zones
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: ["ap-northeast-1a", "ap-northeast-1c", "ap-northeast-1d"]
+      nodeClassRef:
+        apiVersion: karpenter.k8s.aws/v1beta1
+        kind: EC2NodeClass
+        name: general-purpose
+      taints: []
+      startupTaints:
+        - key: node.karpenter.sh/initializing
+          value: "true"
+          effect: NoSchedule
+  # Disruption settings
+  disruption:
+    consolidationPolicy: WhenUnderutilized
+    consolidateAfter: 30s
+    expireAfter: 24h
+  # Resource limits
+  limits:
+    cpu: "1000"
+    memory: "1000Gi"
+  weight: 10
+
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: general-purpose
+  namespace: karpenter
+spec:
+  instanceStorePolicy: RAID0
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-test-test-eks
+    echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+    sysctl -p /etc/sysctl.conf
+  
+  # IAM instance profile
+  instanceProfile: KarpenterNodeInstanceProfile
+  
+  # Networking
+  associatePublicIPAddress: false
+  amiFamily: AL2
+  
+  # Security groups
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-test-test-eks
+  
+  # Subnets
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-test-test-eks
+        
+  # Block device mappings
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: "100Gi"
+        volumeType: "gp3"
+        deleteOnTermination: true
+        encrypted: true
+        
+  # Metadata options
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required
+    
+  # Tags
+  tags:
+    ManagedBy: karpenter
+    Environment: test
+    NodePool: general-purpose
+
+---
+apiVersion: karpenter.sh/v1beta1
+kind: NodePool
+metadata:
+  name: spot-only
+  namespace: karpenter
+spec:
+  template:
+    metadata:
+      labels:
+        karpenter.sh/nodepool: spot-only
+        node-type: spot
+      annotations:
+        node.alpha.kubernetes.io/ttl: "86400"
+    spec:
+      requirements:
+        # Only Spot instances
+        - key: karpenter.sh/capacity-type
+          operator: In
+          values: ["spot"]
+        - key: node.kubernetes.io/instance-type
+          operator: In
+          values: 
+            - t3.small
+            - t3.medium
+            - t3a.small
+            - t3a.medium
+            - t2.small
+            - t2.medium
+        - key: kubernetes.io/arch
+          operator: In
+          values: ["amd64"]
+        - key: topology.kubernetes.io/zone
+          operator: In
+          values: ["ap-northeast-1a", "ap-northeast-1c", "ap-northeast-1d"]
+      nodeClassRef:
+        apiVersion: karpenter.k8s.aws/v1beta1
+        kind: EC2NodeClass
+        name: spot-only
+      taints:
+        - key: spot
+          value: "true"
+          effect: NoSchedule
+      startupTaints:
+        - key: node.karpenter.sh/initializing
+          value: "true"
+          effect: NoSchedule
+  disruption:
+    consolidationPolicy: WhenUnderutilized
+    consolidateAfter: 30s
+    expireAfter: 4h
+  limits:
+    cpu: "500"
+    memory: "500Gi"
+  weight: 20
+
+---
+apiVersion: karpenter.k8s.aws/v1beta1
+kind: EC2NodeClass
+metadata:
+  name: spot-only
+  namespace: karpenter
+spec:
+  instanceStorePolicy: RAID0
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-test-test-eks
+    echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+    sysctl -p /etc/sysctl.conf
+  
+  instanceProfile: KarpenterNodeInstanceProfile
+  associatePublicIPAddress: false
+  amiFamily: AL2
+  
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-test-test-eks
+  
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-test-test-eks
+        
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: "50Gi"
+        volumeType: "gp3"
+        deleteOnTermination: true
+        encrypted: true
+        
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required
+    
+  tags:
+    ManagedBy: karpenter
+    Environment: test
+    NodePool: spot-only
+    CostOptimized: "true"

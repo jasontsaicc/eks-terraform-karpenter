@@ -1,0 +1,189 @@
+apiVersion: karpenter.sh/v1alpha5
+kind: Provisioner
+metadata:
+  name: application-nodes
+spec:
+  # Resource limits for this provisioner
+  limits:
+    resources:
+      cpu: 1000          # Maximum 1000 vCPUs
+      memory: 1000Gi     # Maximum 1000 GiB memory
+  
+  # Requirements for nodes
+  requirements:
+    # Instance types - prefer cost-effective options
+    - key: karpenter.sh/capacity-type
+      operator: In
+      values: ["spot", "on-demand"]  # Prefer SPOT, fallback to on-demand
+    
+    - key: kubernetes.io/arch
+      operator: In
+      values: ["amd64"]
+    
+    # Instance categories
+    - key: node.kubernetes.io/instance-type
+      operator: In
+      values:
+        - t3.medium      # 2 vCPU, 4 GiB - for light workloads
+        - t3.large       # 2 vCPU, 8 GiB - for medium workloads
+        - t3.xlarge      # 4 vCPU, 16 GiB - for heavy workloads
+        - t3a.medium     # AMD variant - cheaper
+        - t3a.large
+        - t3a.xlarge
+    
+    # Availability zones
+    - key: topology.kubernetes.io/zone
+      operator: In
+      values: ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]
+  
+  # Node properties
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-lab-test-eks
+    
+  # Taints for application nodes
+  taints:
+    - key: application
+      value: "true"
+      effect: NoSchedule
+  
+  # Labels for application nodes
+  labels:
+    node-role: application
+    node-type: karpenter
+    managed-by: karpenter
+  
+  # Node expiration settings
+  ttlSecondsAfterEmpty: 30  # Delete node 30 seconds after it's empty
+  ttlSecondsUntilExpired: 604800  # Expire nodes after 7 days (refresh for updates)
+  
+  # AWS-specific settings
+  providerRef:
+    name: application-nodepool
+
+---
+apiVersion: karpenter.k8s.aws/v1alpha1
+kind: AWSNodeInstanceProfile
+metadata:
+  name: application-nodepool
+spec:
+  instanceProfileName: KarpenterNodeInstanceProfile-eks-lab-test-eks
+  
+  # Subnet selector - use private subnets
+  subnetSelector:
+    karpenter.sh/discovery: eks-lab-test-eks
+  
+  # Security group selector
+  securityGroupSelector:
+    karpenter.sh/discovery: eks-lab-test-eks
+  
+  # IAM instance profile
+  instanceStorePolicy: RAID0
+  
+  # User data for node initialization
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-lab-test-eks
+    
+    # Add labels for cost tracking
+    kubectl label nodes $(hostname) cost-center=application
+    kubectl label nodes $(hostname) lifecycle=spot
+  
+  # Block device mappings
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 50Gi
+        volumeType: gp3
+        deleteOnTermination: true
+  
+  # Instance metadata options
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2
+    httpTokens: required
+
+---
+# Provisioner for GitLab Runner with specific requirements
+apiVersion: karpenter.sh/v1alpha5
+kind: Provisioner
+metadata:
+  name: gitlab-runner-nodes
+spec:
+  # Specific limits for GitLab Runner
+  limits:
+    resources:
+      cpu: 500
+      memory: 500Gi
+  
+  requirements:
+    # Prefer SPOT for cost savings
+    - key: karpenter.sh/capacity-type
+      operator: In
+      values: ["spot"]
+    
+    # Larger instances for build jobs
+    - key: node.kubernetes.io/instance-type
+      operator: In
+      values:
+        - t3.large
+        - t3.xlarge
+        - t3.2xlarge
+        - m5.large
+        - m5.xlarge
+    
+    - key: topology.kubernetes.io/zone
+      operator: In
+      values: ["ap-southeast-1a", "ap-southeast-1b", "ap-southeast-1c"]
+  
+  # Runner-specific taints
+  taints:
+    - key: gitlab-runner
+      value: "true"
+      effect: NoSchedule
+  
+  labels:
+    node-role: gitlab-runner
+    node-type: karpenter-runner
+    workload: ci-cd
+  
+  # Aggressive scaling down for cost optimization
+  ttlSecondsAfterEmpty: 10  # Delete quickly when empty
+  ttlSecondsUntilExpired: 86400  # Expire after 1 day
+  
+  providerRef:
+    name: runner-nodepool
+
+---
+apiVersion: karpenter.k8s.aws/v1alpha1
+kind: AWSNodeInstanceProfile
+metadata:
+  name: runner-nodepool
+spec:
+  instanceProfileName: KarpenterNodeInstanceProfile-eks-lab-test-eks
+  
+  subnetSelector:
+    karpenter.sh/discovery: eks-lab-test-eks
+  
+  securityGroupSelector:
+    karpenter.sh/discovery: eks-lab-test-eks
+  
+  # Larger disk for build artifacts
+  blockDeviceMappings:
+    - deviceName: /dev/xvda
+      ebs:
+        volumeSize: 100Gi
+        volumeType: gp3
+        deleteOnTermination: true
+  
+  userData: |
+    #!/bin/bash
+    /etc/eks/bootstrap.sh eks-lab-test-eks
+    
+    # Optimize for containers
+    echo "vm.max_map_count=262144" >> /etc/sysctl.conf
+    sysctl -p
+    
+    # Label for tracking
+    kubectl label nodes $(hostname) workload=gitlab-runner

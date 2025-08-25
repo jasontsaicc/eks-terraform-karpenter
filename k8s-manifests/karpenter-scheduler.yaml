@@ -1,0 +1,237 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: karpenter-scheduler-scripts
+  namespace: karpenter
+data:
+  scale-down.sh: |
+    #!/bin/bash
+    echo "$(date): Starting scale-down for off-hours..."
+    
+    # Scale down all deployments in non-system namespaces
+    for ns in gitlab argocd default; do
+      echo "Scaling down namespace: $ns"
+      kubectl get deployments -n $ns -o name | while read deploy; do
+        kubectl scale --replicas=0 $deploy -n $ns
+      done
+    done
+    
+    # Wait for nodes to be empty
+    sleep 60
+    
+    # Cordon Karpenter nodes to prevent new scheduling
+    kubectl get nodes -l node-role=application -o name | while read node; do
+      kubectl cordon $node
+    done
+    
+    echo "$(date): Scale-down completed"
+  
+  scale-up.sh: |
+    #!/bin/bash
+    echo "$(date): Starting scale-up for work hours..."
+    
+    # Uncordon all nodes
+    kubectl get nodes -l node-role=application -o name | while read node; do
+      kubectl uncordon $node
+    done
+    
+    # Scale up essential services
+    kubectl scale deployment gitlab -n gitlab --replicas=1 2>/dev/null || true
+    kubectl scale deployment argocd-server -n argocd --replicas=1 2>/dev/null || true
+    kubectl scale deployment argocd-repo-server -n argocd --replicas=1 2>/dev/null || true
+    
+    echo "$(date): Scale-up completed"
+  
+  weekend-shutdown.sh: |
+    #!/bin/bash
+    echo "$(date): Weekend shutdown - scaling to zero..."
+    
+    # Scale everything to zero
+    for ns in gitlab argocd default; do
+      kubectl scale deployment --all --replicas=0 -n $ns
+      kubectl scale statefulset --all --replicas=0 -n $ns
+    done
+    
+    # Delete all Karpenter nodes
+    kubectl delete nodes -l node-role=application
+    
+    echo "$(date): Weekend shutdown completed"
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scale-down-evening
+  namespace: karpenter
+spec:
+  schedule: "0 19 * * 1-5"  # 7 PM Monday-Friday (UTC)
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: karpenter
+          containers:
+          - name: kubectl
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              bash /scripts/scale-down.sh
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: scripts
+            configMap:
+              name: karpenter-scheduler-scripts
+              defaultMode: 0755
+          restartPolicy: OnFailure
+          tolerations:
+          - key: system-only
+            value: "true"
+            effect: NoSchedule
+          nodeSelector:
+            role: system
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: scale-up-morning
+  namespace: karpenter
+spec:
+  schedule: "0 8 * * 1-5"  # 8 AM Monday-Friday (UTC)
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: karpenter
+          containers:
+          - name: kubectl
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              bash /scripts/scale-up.sh
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: scripts
+            configMap:
+              name: karpenter-scheduler-scripts
+              defaultMode: 0755
+          restartPolicy: OnFailure
+          tolerations:
+          - key: system-only
+            value: "true"
+            effect: NoSchedule
+          nodeSelector:
+            role: system
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weekend-shutdown
+  namespace: karpenter
+spec:
+  schedule: "0 20 * * 5"  # 8 PM Friday (UTC)
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: karpenter
+          containers:
+          - name: kubectl
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              bash /scripts/weekend-shutdown.sh
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: scripts
+            configMap:
+              name: karpenter-scheduler-scripts
+              defaultMode: 0755
+          restartPolicy: OnFailure
+          tolerations:
+          - key: system-only
+            value: "true"
+            effect: NoSchedule
+          nodeSelector:
+            role: system
+
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: weekend-startup
+  namespace: karpenter
+spec:
+  schedule: "0 8 * * 1"  # 8 AM Monday (UTC)
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: karpenter
+          containers:
+          - name: kubectl
+            image: bitnami/kubectl:latest
+            command:
+            - /bin/bash
+            - -c
+            - |
+              bash /scripts/scale-up.sh
+            volumeMounts:
+            - name: scripts
+              mountPath: /scripts
+          volumes:
+          - name: scripts
+            configMap:
+              name: karpenter-scheduler-scripts
+              defaultMode: 0755
+          restartPolicy: OnFailure
+          tolerations:
+          - key: system-only
+            value: "true"
+            effect: NoSchedule
+          nodeSelector:
+            role: system
+
+---
+# RBAC for scheduler
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: karpenter-scheduler
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments", "statefulsets"]
+  verbs: ["get", "list", "patch", "update"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "patch", "update", "delete"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "delete"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: karpenter-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: karpenter-scheduler
+subjects:
+- kind: ServiceAccount
+  name: karpenter
+  namespace: karpenter

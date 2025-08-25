@@ -1,0 +1,204 @@
+# ArgoCD optimized for Karpenter nodes
+# This patch modifies the default ArgoCD installation to use Karpenter nodes
+
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: argocd
+---
+# Patch for ArgoCD Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-server
+  namespace: argocd
+spec:
+  template:
+    spec:
+      # Use Karpenter application nodes
+      nodeSelector:
+        node-role: application
+      
+      # Tolerate application taint
+      tolerations:
+      - key: application
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: argocd-server
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+
+---
+# Patch for ArgoCD Repo Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-repo-server
+  namespace: argocd
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role: application
+      
+      tolerations:
+      - key: application
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: argocd-repo-server
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+
+---
+# Patch for ArgoCD Redis
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-redis
+  namespace: argocd
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role: application
+      
+      tolerations:
+      - key: application
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: redis
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+
+---
+# Patch for ArgoCD Application Controller
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: argocd-application-controller
+  namespace: argocd
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role: application
+      
+      tolerations:
+      - key: application
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: argocd-application-controller
+        resources:
+          requests:
+            cpu: "500m"
+            memory: "512Mi"
+          limits:
+            cpu: "1"
+            memory: "1Gi"
+
+---
+# Patch for ArgoCD Dex Server
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: argocd-dex-server
+  namespace: argocd
+spec:
+  template:
+    spec:
+      nodeSelector:
+        node-role: application
+      
+      tolerations:
+      - key: application
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: dex
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+
+---
+# HPA for ArgoCD Server
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: argocd-server-hpa
+  namespace: argocd
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: argocd-server
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+
+---
+# HPA for ArgoCD Repo Server
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: argocd-repo-server-hpa
+  namespace: argocd
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: argocd-repo-server
+  minReplicas: 1
+  maxReplicas: 5
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80

@@ -1,0 +1,251 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: gitlab
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab
+  namespace: gitlab
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gitlab
+  template:
+    metadata:
+      labels:
+        app: gitlab
+    spec:
+      # Node selection for Karpenter application nodes
+      nodeSelector:
+        node-role: application
+      
+      # Tolerations for application taint
+      tolerations:
+      - key: application
+        value: "true"
+        effect: NoSchedule
+      
+      # Anti-affinity to spread across nodes
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - gitlab
+              topologyKey: kubernetes.io/hostname
+      
+      containers:
+      - name: gitlab
+        image: gitlab/gitlab-ce:latest
+        ports:
+        - containerPort: 80
+          name: http
+        - containerPort: 443
+          name: https
+        - containerPort: 22
+          name: ssh
+        
+        # Resource requests to trigger Karpenter scaling
+        resources:
+          requests:
+            cpu: "2"
+            memory: "4Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        
+        env:
+        - name: GITLAB_OMNIBUS_CONFIG
+          value: |
+            external_url 'http://gitlab.example.com'
+            gitlab_rails['gitlab_shell_ssh_port'] = 22
+            # Optimize for Kubernetes
+            postgresql['shared_buffers'] = "256MB"
+            prometheus_monitoring['enable'] = false
+        
+        volumeMounts:
+        - name: gitlab-config
+          mountPath: /etc/gitlab
+        - name: gitlab-logs
+          mountPath: /var/log/gitlab
+        - name: gitlab-data
+          mountPath: /var/opt/gitlab
+      
+      volumes:
+      - name: gitlab-config
+        persistentVolumeClaim:
+          claimName: gitlab-config-pvc
+      - name: gitlab-logs
+        persistentVolumeClaim:
+          claimName: gitlab-logs-pvc
+      - name: gitlab-data
+        persistentVolumeClaim:
+          claimName: gitlab-data-pvc
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-config-pvc
+  namespace: gitlab
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+  storageClassName: gp3
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-logs-pvc
+  namespace: gitlab
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: gp3
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: gitlab-data-pvc
+  namespace: gitlab
+spec:
+  accessModes:
+  - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: gp3
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gitlab
+  namespace: gitlab
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: gitlab
+  ports:
+  - name: http
+    port: 80
+    targetPort: 80
+  - name: https
+    port: 443
+    targetPort: 443
+  - name: ssh
+    port: 22
+    targetPort: 22
+
+---
+# GitLab Runner Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gitlab-runner
+  namespace: gitlab
+spec:
+  replicas: 2  # Multiple runners for parallel jobs
+  selector:
+    matchLabels:
+      app: gitlab-runner
+  template:
+    metadata:
+      labels:
+        app: gitlab-runner
+    spec:
+      # Use dedicated runner nodes
+      nodeSelector:
+        node-role: gitlab-runner
+      
+      # Tolerations for runner taint
+      tolerations:
+      - key: gitlab-runner
+        value: "true"
+        effect: NoSchedule
+      
+      containers:
+      - name: gitlab-runner
+        image: gitlab/gitlab-runner:latest
+        
+        # Resource requests to trigger node creation
+        resources:
+          requests:
+            cpu: "1"
+            memory: "2Gi"
+          limits:
+            cpu: "4"
+            memory: "8Gi"
+        
+        env:
+        - name: GITLAB_URL
+          value: "http://gitlab.gitlab.svc.cluster.local"
+        - name: REGISTRATION_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: gitlab-runner-secret
+              key: runner-token
+        - name: RUNNER_EXECUTOR
+          value: "kubernetes"
+        - name: KUBERNETES_NAMESPACE
+          value: "gitlab"
+        - name: KUBERNETES_PRIVILEGED
+          value: "true"
+        - name: KUBERNETES_CPU_REQUEST
+          value: "1"
+        - name: KUBERNETES_MEMORY_REQUEST
+          value: "1Gi"
+        - name: KUBERNETES_CPU_LIMIT
+          value: "2"
+        - name: KUBERNETES_MEMORY_LIMIT
+          value: "4Gi"
+        - name: KUBERNETES_SERVICE_CPU_REQUEST
+          value: "100m"
+        - name: KUBERNETES_SERVICE_MEMORY_REQUEST
+          value: "128Mi"
+        - name: KUBERNETES_HELPER_CPU_REQUEST
+          value: "100m"
+        - name: KUBERNETES_HELPER_MEMORY_REQUEST
+          value: "128Mi"
+        
+        volumeMounts:
+        - name: config
+          mountPath: /etc/gitlab-runner
+        - name: docker-socket
+          mountPath: /var/run/docker.sock
+      
+      volumes:
+      - name: config
+        emptyDir:
+          medium: Memory
+      - name: docker-socket
+        hostPath:
+          path: /var/run/docker.sock
+
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: gitlab-runner-secret
+  namespace: gitlab
+type: Opaque
+stringData:
+  runner-token: "your-runner-registration-token"  # Replace with actual token

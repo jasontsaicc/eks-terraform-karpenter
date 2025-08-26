@@ -45,7 +45,7 @@ cat <<EOF > /tmp/karpenter-trust-policy.json
       "Action": "sts:AssumeRoleWithWebIdentity",
       "Condition": {
         "StringEquals": {
-          "oidc.eks.${AWS_REGION}.amazonaws.com/id/${OIDC_ID}:sub": "system:serviceaccount:karpenter:karpenter",
+          "oidc.eks.${AWS_REGION}.amazonaws.com/id/${OIDC_ID}:sub": "system:serviceaccount:kube-system:karpenter",
           "oidc.eks.${AWS_REGION}.amazonaws.com/id/${OIDC_ID}:aud": "sts.amazonaws.com"
         }
       }
@@ -132,29 +132,89 @@ aws iam add-role-to-instance-profile \
 # Step 4: Install Karpenter with Helm
 echo "Step 4: 安裝 Karpenter..."
 
-kubectl create namespace karpenter 2>/dev/null || true
+# Install CRDs first (v1.6.2 compatible)
+echo "Installing Karpenter v1.6.2 CRDs..."
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.6.2/pkg/apis/crds/karpenter.sh_nodepools.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.6.2/pkg/apis/crds/karpenter.sh_nodeclaims.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.6.2/pkg/apis/crds/karpenter.k8s.aws_ec2nodeclasses.yaml
 
-helm repo add karpenter https://charts.karpenter.sh
-helm repo update
+# Create SQS Queue for interruption handling
+echo "Creating SQS Queue..."
+aws sqs create-queue --queue-name ${CLUSTER_NAME} --region ${AWS_REGION} 2>/dev/null || echo "Queue already exists"
 
-helm upgrade --install karpenter karpenter/karpenter \
+# Add SQS and EKS permissions to IAM role
+echo "Adding additional permissions to IAM role..."
+cat <<'POLICY' > /tmp/additional-karpenter-policy.json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "eks:DescribeCluster",
+        "sqs:GetQueueUrl",
+        "sqs:GetQueueAttributes",
+        "sqs:ReceiveMessage",
+        "sqs:DeleteMessage"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+POLICY
+
+aws iam put-role-policy \
+    --role-name KarpenterControllerRole-${CLUSTER_NAME} \
+    --policy-name KarpenterAdditionalPolicy \
+    --policy-document file:///tmp/additional-karpenter-policy.json \
+    2>/dev/null || echo "Additional policy already attached"
+
+# Install Karpenter v1.6.2 with enhanced configuration
+helm upgrade --install karpenter \
+    oci://public.ecr.aws/karpenter/karpenter \
     --namespace karpenter \
-    --version v0.35.0 \
+    --create-namespace \
+    --version "1.6.2" \
     --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"="arn:aws:iam::${AWS_ACCOUNT_ID}:role/KarpenterControllerRole-${CLUSTER_NAME}" \
     --set settings.clusterName=${CLUSTER_NAME} \
     --set settings.clusterEndpoint=${CLUSTER_ENDPOINT} \
     --set settings.interruptionQueue=${CLUSTER_NAME} \
-    --set controller.resources.requests.cpu=100m \
-    --set controller.resources.requests.memory=100Mi \
-    --set webhook.resources.requests.cpu=100m \
-    --set webhook.resources.requests.memory=100Mi \
+    --set controller.resources.requests.cpu=1 \
+    --set controller.resources.requests.memory=1Gi \
+    --set controller.resources.limits.cpu=2 \
+    --set controller.resources.limits.memory=2Gi \
+    --set replicas=2 \
+    --set logLevel=info \
     --wait
 
-# Step 5: Apply Karpenter Provisioners
-echo "Step 5: 配置 Karpenter Provisioners..."
-kubectl apply -f /home/ubuntu/projects/aws_eks_terraform/k8s-manifests/karpenter-provisioner.yaml
+# Step 5: Tag resources for Karpenter discovery
+echo "Step 5: 標記資源供 Karpenter 使用..."
+
+# Tag subnets
+for subnet in $(aws ec2 describe-subnets --region ${AWS_REGION} \
+    --filters "Name=vpc-id,Values=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.resourcesVpcConfig.vpcId' --output text)" \
+    --query 'Subnets[?MapPublicIpOnLaunch==`false`].SubnetId' --output text); do
+  aws ec2 create-tags --region ${AWS_REGION} \
+    --resources $subnet \
+    --tags Key=karpenter.sh/discovery,Value=${CLUSTER_NAME}
+done
+
+# Tag security group
+cluster_sg=$(aws eks describe-cluster --name ${CLUSTER_NAME} --region ${AWS_REGION} --query 'cluster.resourcesVpcConfig.clusterSecurityGroupId' --output text)
+aws ec2 create-tags --region ${AWS_REGION} \
+    --resources $cluster_sg \
+    --tags Key=karpenter.sh/discovery,Value=${CLUSTER_NAME}
+
+# Step 6: Apply Karpenter NodePool and EC2NodeClass
+echo "Step 6: 配置 Karpenter NodePool..."
+if [ -f /home/ubuntu/projects/aws_eks_terraform/karpenter-nodepool.yaml ]; then
+    kubectl apply -f /home/ubuntu/projects/aws_eks_terraform/karpenter-nodepool.yaml
+else
+    echo "Warning: NodePool configuration file not found"
+fi
 
 echo ""
 echo "=== Karpenter 安裝完成 ==="
-kubectl get pods -n karpenter
-kubectl get provisioners
+kubectl get pods -n kube-system -l app.kubernetes.io/name=karpenter
+kubectl get nodepools -A
+kubectl get ec2nodeclasses -A

@@ -162,16 +162,16 @@ install_karpenter() {
     
     # Install Karpenter
     helm upgrade --install karpenter \
-        karpenter/karpenter \
-        --namespace karpenter \
-        --version v0.35.0 \
+        oci://public.ecr.aws/karpenter/karpenter \
+        --namespace kube-system \
+        --version "1.0.6" \
         --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=$KARPENTER_CONTROLLER_ROLE_ARN \
         --set settings.clusterName=$CLUSTER_NAME \
         --set settings.interruptionQueue=$CLUSTER_NAME-karpenter \
         --wait
     
-    # Apply provisioners
-    kubectl apply -f karpenter/provisioners.yaml
+    # Apply NodePool configuration
+    kubectl apply -f /home/ubuntu/projects/aws_eks_terraform/karpenter-nodepool.yaml
     
     log_info "Karpenter installed and configured"
 }

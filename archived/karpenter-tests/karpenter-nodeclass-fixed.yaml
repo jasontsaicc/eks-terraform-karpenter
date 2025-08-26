@@ -1,0 +1,66 @@
+apiVersion: karpenter.k8s.aws/v1
+kind: EC2NodeClass
+metadata:
+  name: default
+spec:
+  # AMI 配置
+  amiFamily: AL2
+  amiSelectorTerms:
+    - alias: al2@latest
+  
+  # 實例配置
+  associatePublicIPAddress: false
+  instanceStorePolicy: RAID0
+  
+  # IAM 配置
+  role: KarpenterNodeRole-eks-lab-test-eks
+  
+  # 網路配置
+  subnetSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-lab-test-eks
+  securityGroupSelectorTerms:
+    - tags:
+        karpenter.sh/discovery: eks-lab-test-eks
+  
+  # IMDS 配置 (重要!)
+  metadataOptions:
+    httpEndpoint: enabled
+    httpProtocolIPv6: disabled
+    httpPutResponseHopLimit: 2  # 增加 hop limit
+    httpTokens: required
+  
+  # 增強的 User Data 腳本
+  userData: |
+    #!/bin/bash
+    set -o xtrace
+    
+    # 設置日誌
+    exec > >(tee /var/log/user-data.log|logger -t user-data -s 2>/dev/console) 2>&1
+    echo "Starting user data script at $(date)"
+    
+    # 設置環境變數
+    export AWS_DEFAULT_REGION=ap-southeast-1
+    export AWS_REGION=ap-southeast-1
+    
+    # 檢查網路連線
+    echo "Testing network connectivity..."
+    curl -v --connect-timeout 10 https://ec2.ap-southeast-1.amazonaws.com/ || echo "EC2 API connectivity failed"
+    curl -v --connect-timeout 10 https://3F1AA6C6B518B869FDDAFD647F3DEFB4.sk1.ap-southeast-1.eks.amazonaws.com/version || echo "EKS API connectivity failed"
+    
+    # 等待實例完全初始化
+    echo "Waiting for instance to be ready..."
+    sleep 30
+    
+    # 檢查 IMDS 訪問
+    echo "Testing IMDS access..."
+    TOKEN=$(curl -X PUT "http://169.254.169.254/latest/api/token" -H "X-aws-ec2-metadata-token-ttl-seconds: 21600" --connect-timeout 5) || echo "IMDS token failed"
+    if [ -n "$TOKEN" ]; then
+        curl -H "X-aws-ec2-metadata-token: $TOKEN" http://169.254.169.254/latest/meta-data/instance-id --connect-timeout 5 || echo "IMDS data failed"
+    fi
+    
+    # 執行 EKS bootstrap
+    echo "Starting EKS bootstrap..."
+    /etc/eks/bootstrap.sh eks-lab-test-eks --container-runtime containerd --apiserver-endpoint https://3F1AA6C6B518B869FDDAFD647F3DEFB4.sk1.ap-southeast-1.eks.amazonaws.com --b64-cluster-ca LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSURCVENDQWUyZ0F3SUJBZ0lJSStqUWM5ZkRnSGt3RFFZSktvWklodmNOQVFFTEJRQXdGVEVUTUJFR0ExVUUKQXhNS2EzVmlaWEp1WlhSbGN6QWVGdzB5TlRBNE1qVXhNakF5TWpSYUZ3MHpOVEE0TWpNeE1qQTNNalJhTUJVeApFekFSQmdOVkJBTVRDbXQxWW1WeWJtVjBaWE13Z2dFaU1BMEdDU3FHU0liM0RRRUJBUVVBQTRJQkR3QXdnZ0VLCkFvSUJBUUNxUDVmaTRIM1c2TDBBUVNBeDR4Mjl6UzZieTI5YWFBZlEzUXdoaVA0OGNST2ZOb3JrTkJjckdVY2kKY2dGMjgvTy81bm53UmtKRWhWUmg2R2JVdCtUSk5OUXVYbDc3bWVPSVBTNVQyQWd6Q0JmMnFESTFQeVVBVW9tSgp1K3d4Qm5razgreVJYM1R1blQ2d2xxc01tc1hvU2xib2VaeXhFWXBCbFZIdWkvZWs0ZUxtZUd6V2J0OUN0QnJYCjVqc3NBOTV2NnI4VHExZEpabzQ5UHdFbmFlQWhDRTJDYlpHS0oxM1dKK3RzcDRvaTVycnJEN2dOMk5FVndHWUQKK0ZZN2RXTnJ0QTlZL0krMnJVYmFLUlA1WUlJV2RKUlZKcG1oOHBVdExxOG9sRk1CdjhEQjUyK0Ewb3VZUXNibQpobTdCenQ2QkVta3RGcmpUd2w3MEhobERUTktmQWdNQkFBR2pXVEJYTUE0R0ExVWREd0VCL3dRRUF3SUNwREFQCkJnTlZIUk1CQWY4RUJUQURBUUgvTUIwR0ExVWREZ1FXQkJRYkl0VUpyNVh2NTlFMythRWN1VHBTcTVBMDdEQVYKQmdOVkhSRUVEakFNZ2dwcmRXSmxjbTVsZEdWek1BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQkowZ3lUb2NaTgp6dmVoNm01Z2hXU2hzS1pnVkdoNXBoSU0yclZMaWpMc2c5R0hJckxNdUxHYi8zTVdNUHMrekxhK3dOL2k3ZmtpCjNEQ2ROT1M1eXFaVTNGMnZCT0tUdmdHTkxEOXJlSlJuaXZ6VGlUTGtoNFJFOFh2SHlnRnpHeFZSMmlKNmZJYWcKaUVWN0xYbE1haGdZMWVvUkxCM3Y0ZE9ycnZKTCthSUg1aGRPTkl4WkRCd1Z5WWZOMk9iMElXMFZKMTAxelUraAp6bVJBcnp6TktWWUdqK2NBVk9DaXZrS0Qrd2swcndNUnZuMmZCLzlya2JMdzRjSkRQeXZ6cThTWjBTUVlyQmo1CkovcktTMElkcFUvZkJ0azFhSGg1UWlLcStGUmczRkpYWGhESEt4U1QvbW05SFk5MVhKMWdta1dqNEs1T2ptOU4Kb3lJRDU3b3FFTHJNCi0tLS0tRU5EIENFUlRJRklDQVRFLS0tLS0K
+    
+    echo "User data script completed at $(date)"

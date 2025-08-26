@@ -1,0 +1,148 @@
+---
+# 測試 Karpenter 擴容的高資源需求工作負載
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scaling-test-high-demand
+  namespace: default
+  labels:
+    test: karpenter-scaling
+spec:
+  replicas: 5
+  selector:
+    matchLabels:
+      app: scaling-test-high-demand
+  template:
+    metadata:
+      labels:
+        app: scaling-test-high-demand
+    spec:
+      # 指定調度到 Karpenter 節點
+      nodeSelector:
+        nodepool: general-purpose
+      # 容忍 Karpenter 污點
+      tolerations:
+        - key: karpenter.sh/nodepool
+          value: general-purpose
+          effect: NoSchedule
+      containers:
+      - name: resource-consumer
+        image: nginx:alpine
+        resources:
+          requests:
+            # 每個 Pod 需要較多資源，強制創建新節點
+            cpu: "500m"    # 0.5 CPU
+            memory: "1Gi"  # 1GB RAM
+          limits:
+            cpu: "1000m"   # 1 CPU
+            memory: "2Gi"  # 2GB RAM
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          echo "Pod $POD_NAME running on node $NODE_NAME"
+          echo "Resource requests: 500m CPU, 1Gi RAM"
+          echo "Starting workload simulation..."
+          while true; do
+            echo "$(date): Simulating CPU/memory workload on $NODE_NAME"
+            sleep 30
+          done
+
+---
+# 測試 Karpenter 縮容的低資源需求工作負載
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: scaling-test-low-demand
+  namespace: default
+  labels:
+    test: karpenter-scaling
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: scaling-test-low-demand
+  template:
+    metadata:
+      labels:
+        app: scaling-test-low-demand
+    spec:
+      # 指定調度到 Karpenter 節點
+      nodeSelector:
+        nodepool: general-purpose
+      # 容忍 Karpenter 污點
+      tolerations:
+        - key: karpenter.sh/nodepool
+          value: general-purpose
+          effect: NoSchedule
+      containers:
+      - name: lightweight-workload
+        image: alpine:latest
+        resources:
+          requests:
+            cpu: "50m"     # 0.05 CPU
+            memory: "64Mi" # 64MB RAM
+          limits:
+            cpu: "100m"    # 0.1 CPU
+            memory: "128Mi" # 128MB RAM
+        command:
+        - sh
+        - -c
+        - |
+          echo "Lightweight pod starting..."
+          while true; do
+            echo "$(date): Low resource usage simulation"
+            sleep 60
+          done
+
+---
+# 測試批次作業 (Job) 擴縮容
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: karpenter-batch-test
+  namespace: default
+  labels:
+    test: karpenter-scaling
+spec:
+  completions: 3
+  parallelism: 3
+  template:
+    metadata:
+      labels:
+        app: batch-test
+    spec:
+      restartPolicy: Never
+      nodeSelector:
+        nodepool: general-purpose
+      tolerations:
+        - key: karpenter.sh/nodepool
+          value: general-purpose
+          effect: NoSchedule
+      containers:
+      - name: batch-processor
+        image: busybox:latest
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "400m"
+            memory: "512Mi"
+        command:
+        - sh
+        - -c
+        - |
+          echo "Batch job starting on node: $HOSTNAME"
+          echo "Processing workload for 120 seconds..."
+          sleep 120
+          echo "Batch job completed successfully"

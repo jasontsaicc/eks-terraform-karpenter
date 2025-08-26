@@ -26,9 +26,13 @@ fi
 # Update kubeconfig
 aws eks update-kubeconfig --name $CLUSTER_NAME --region $AWS_REGION --kubeconfig /tmp/eks-config
 
-# Step 1: Deploy Karpenter Provisioners
-echo "Step 1: 部署 Karpenter Provisioners..."
-kubectl apply -f /home/ubuntu/projects/aws_eks_terraform/k8s-manifests/karpenter-provisioner.yaml
+# Step 1: Deploy Karpenter NodePool and EC2NodeClass
+echo "Step 1: 部署 Karpenter NodePool..."
+if [ -f /home/ubuntu/projects/aws_eks_terraform/karpenter-nodepool.yaml ]; then
+    kubectl apply -f /home/ubuntu/projects/aws_eks_terraform/karpenter-nodepool.yaml
+else
+    echo "Warning: NodePool configuration file not found"
+fi
 
 # Step 2: Deploy Time-based Scheduler
 echo "Step 2: 部署時間排程器..."
@@ -176,8 +180,8 @@ echo ""
 echo "系統組件狀態:"
 kubectl get pods -n kube-system | grep -E "aws-load-balancer|karpenter"
 echo ""
-echo "Karpenter Provisioners:"
-kubectl get provisioners
+echo "Karpenter NodePools:"
+kubectl get nodepools -A
 echo ""
 echo "當前節點:"
 kubectl get nodes -L role,node-role

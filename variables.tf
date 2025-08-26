@@ -153,3 +153,15 @@ variable "enable_ebs_csi_driver" {
   type        = bool
   default     = true
 }
+
+variable "enable_karpenter" {
+  description = "啟用 Karpenter 自動擴展"
+  type        = bool
+  default     = true
+}
+
+variable "enable_aws_load_balancer_controller" {
+  description = "啟用 AWS Load Balancer Controller"
+  type        = bool
+  default     = true
+}

@@ -1,0 +1,32 @@
+{
+  "aws_load_balancer_controller_role_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": ""
+  },
+  "cluster_name": {
+    "sensitive": false,
+    "type": "string",
+    "value": "eks-lab-test-eks"
+  },
+  "karpenter_controller_role_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": ""
+  },
+  "node_group_iam_role_arn": {
+    "sensitive": false,
+    "type": "string",
+    "value": "arn:aws:iam::273528188825:role/eks-lab-test-eks-node-group-role"
+  },
+  "region": {
+    "sensitive": false,
+    "type": "string",
+    "value": "ap-southeast-1"
+  },
+  "vpc_id": {
+    "sensitive": false,
+    "type": "string",
+    "value": "vpc-006e79ec4f5c2b0ec"
+  }
+}

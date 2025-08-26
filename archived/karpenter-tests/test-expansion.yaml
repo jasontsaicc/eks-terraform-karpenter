@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: expansion-test
+  namespace: default
+  labels:
+    test: karpenter-expansion
+spec:
+  replicas: 6  # 6個 Pod，每個需要 800m CPU，總共 4.8 CPU
+  selector:
+    matchLabels:
+      app: expansion-test
+  template:
+    metadata:
+      labels:
+        app: expansion-test
+    spec:
+      containers:
+      - name: resource-consumer
+        image: nginx:alpine
+        resources:
+          requests:
+            cpu: "800m"      # 0.8 CPU per pod
+            memory: "400Mi"  # 400MB memory per pod
+          limits:
+            cpu: "1000m"     # 1 CPU limit
+            memory: "500Mi"  # 500MB limit
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          echo "=== Pod $POD_NAME started on node $NODE_NAME ==="
+          echo "CPU Request: 800m, Memory Request: 400Mi"
+          echo "Current time: $(date)"
+          while true; do
+            echo "$(date): Pod $POD_NAME running on $NODE_NAME (CPU: 800m, Mem: 400Mi)"
+            sleep 60
+          done

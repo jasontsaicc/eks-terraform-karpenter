@@ -62,8 +62,8 @@ kubectl get pods -A -o json | jq -r '.items | group_by(.metadata.namespace) | .[
 echo ""
 echo "3. Karpenter 狀態"
 echo "=================="
-echo "Provisioners:"
-kubectl get provisioners 2>/dev/null || echo "無 Provisioners"
+echo "NodePools:"
+kubectl get nodepools -A 2>/dev/null || echo "無 NodePools"
 
 echo ""
 echo "Karpenter Pods:"

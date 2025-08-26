@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karpenter-test
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: karpenter-test
+  template:
+    metadata:
+      labels:
+        app: karpenter-test
+    spec:
+      tolerations:
+        - key: karpenter.sh/nodepool
+          value: general-purpose
+          effect: NoSchedule
+      nodeSelector:
+        nodepool: general-purpose
+      containers:
+      - name: nginx
+        image: nginx:latest
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: 500m
+            memory: 1Gi

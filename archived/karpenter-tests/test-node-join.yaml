@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: node-join-test
+  namespace: default
+  labels:
+    test: node-join-fix
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: node-join-test
+  template:
+    metadata:
+      labels:
+        app: node-join-test
+    spec:
+      containers:
+      - name: test-container
+        image: nginx:alpine
+        resources:
+          requests:
+            cpu: "900m"      # 強制需要新節點
+            memory: "500Mi"
+          limits:
+            cpu: "1000m"
+            memory: "600Mi"
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          echo "=== Testing node join fix ==="
+          echo "Pod: $POD_NAME on Node: $NODE_NAME"
+          echo "Time: $(date)"
+          while true; do
+            echo "$(date): Pod running successfully on $NODE_NAME"
+            sleep 60
+          done

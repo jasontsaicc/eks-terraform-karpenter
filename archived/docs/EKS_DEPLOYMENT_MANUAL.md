@@ -244,19 +244,23 @@ kubectl create namespace karpenter
 helm repo add karpenter https://karpenter.sh/charts
 helm repo update
 
-# 3. 安裝 Karpenter
-helm upgrade --install karpenter karpenter/karpenter \
-  --namespace karpenter \
-  --version v0.35.0 \
+# 3. 安裝 Karpenter CRDs
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.0.6/pkg/apis/crds/karpenter.sh_nodepools.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.0.6/pkg/apis/crds/karpenter.sh_nodeclaims.yaml
+kubectl apply -f https://raw.githubusercontent.com/aws/karpenter-provider-aws/v1.0.6/pkg/apis/crds/karpenter.k8s.aws_ec2nodeclasses.yaml
+
+# 4. 安裝 Karpenter
+helm upgrade --install karpenter \
+  oci://public.ecr.aws/karpenter/karpenter \
+  --namespace kube-system \
+  --version "1.0.6" \
   --set serviceAccount.annotations."eks\.amazonaws\.com/role-arn"=$KARPENTER_CONTROLLER_ROLE \
   --set settings.clusterName=$CLUSTER_NAME \
-  --set settings.interruptionQueue=$CLUSTER_NAME-karpenter \
-  --set controller.resources.requests.cpu=1 \
-  --set controller.resources.requests.memory=1Gi \
+  --set settings.interruptionQueue=$CLUSTER_NAME \
   --wait
 
-# 4. 應用 Karpenter Provisioners
-kubectl apply -f karpenter/provisioners.yaml
+# 5. 應用 Karpenter NodePool 配置
+kubectl apply -f /home/ubuntu/projects/aws_eks_terraform/karpenter-nodepool.yaml
 
 # 5. 驗證安裝
 kubectl get pods -n karpenter

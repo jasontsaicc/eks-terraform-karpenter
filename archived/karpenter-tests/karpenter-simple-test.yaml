@@ -1,0 +1,46 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: resource-consumer
+  namespace: default
+  labels:
+    test: karpenter-scaling
+spec:
+  replicas: 6
+  selector:
+    matchLabels:
+      app: resource-consumer
+  template:
+    metadata:
+      labels:
+        app: resource-consumer
+    spec:
+      containers:
+      - name: consumer
+        image: nginx:alpine
+        resources:
+          requests:
+            cpu: "900m"     # 0.9 CPU - will require 3+ nodes
+            memory: "500Mi"  # 500MB memory
+          limits:
+            cpu: "1000m"    # 1 CPU max
+            memory: "600Mi"  # 600MB max
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        command:
+        - sh
+        - -c
+        - |
+          echo "Pod $POD_NAME starting on node $NODE_NAME"
+          echo "Requested: 900m CPU, 500Mi memory"
+          while true; do
+            echo "$(date): Running on $NODE_NAME - CPU: 900m, Memory: 500Mi"
+            sleep 30
+          done

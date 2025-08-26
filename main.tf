@@ -57,11 +57,13 @@ module "iam" {
 
   cluster_name                        = local.cluster_name
   enable_irsa                         = var.enable_irsa
-  cluster_oidc_issuer_url            = ""  # Will be updated after EKS creation
-  enable_karpenter                    = false
-  enable_aws_load_balancer_controller = true
+  cluster_oidc_issuer_url            = try(aws_eks_cluster.main.identity[0].oidc[0].issuer, "")
+  enable_karpenter                    = var.enable_karpenter
+  enable_aws_load_balancer_controller = var.enable_aws_load_balancer_controller
   enable_ebs_csi_driver              = var.enable_ebs_csi_driver
   tags                               = var.tags
+
+  depends_on = [aws_eks_cluster.main]
 }
 
 # Phase 3: EKS Cluster (simplified)
@@ -158,4 +160,26 @@ output "karpenter_controller_role_arn" {
 
 output "region" {
   value = var.region
+}
+
+output "karpenter_instance_profile_name" {
+  value = try(module.iam.karpenter_instance_profile_name, "")
+}
+
+output "private_subnet_ids" {
+  value = module.vpc.private_subnet_ids
+}
+
+output "cluster_ca_certificate" {
+  value = aws_eks_cluster.main.certificate_authority[0].data
+}
+
+output "cluster_token" {
+  value = data.aws_eks_cluster_auth.main.token
+  sensitive = true
+}
+
+# Get cluster auth token
+data "aws_eks_cluster_auth" "main" {
+  name = aws_eks_cluster.main.name
 }

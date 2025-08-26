@@ -1,0 +1,272 @@
+# Enterprise EKS Configuration Template
+# 企業級 EKS 配置模板
+# 
+# IMPORTANT: Copy this file to terraform.tfvars and customize for your environment
+# 重要：複製此檔案為 terraform.tfvars 並根據你的環境自訂
+
+# =============================================================================
+# NAMING AND IDENTIFICATION
+# =============================================================================
+
+# Project naming convention: {organization}-{team}-{environment}
+# This ensures no conflicts with existing resources
+project_name = "acme-platform"  # Change to your organization
+environment  = "production"      # Options: dev, staging, production
+region      = "us-west-2"       # Your target AWS region
+
+# =============================================================================
+# NETWORK CONFIGURATION (CRITICAL)
+# =============================================================================
+
+# IMPORTANT: Choose a CIDR that doesn't overlap with:
+# - Existing VPCs in your account
+# - On-premises networks
+# - VPN/Direct Connect routes
+# - Other cloud providers (if using multi-cloud)
+vpc_cidr = "10.100.0.0/16"  # Adjust to avoid conflicts
+
+# Availability Zones (recommend 3 for production)
+azs = ["us-west-2a", "us-west-2b", "us-west-2c"]
+
+# Subnet allocation (adjust based on your vpc_cidr)
+private_subnets = ["10.100.1.0/24", "10.100.2.0/24", "10.100.3.0/24"]
+public_subnets  = ["10.100.101.0/24", "10.100.102.0/24", "10.100.103.0/24"]
+
+# NAT Gateway configuration (COST OPTIMIZATION)
+# - true: Single NAT Gateway (save $90/month) - for dev/test
+# - false: NAT Gateway per AZ (HA) - for production
+single_nat_gateway = false  # Set to true for dev/test environments
+enable_nat_gateway = true   # Must be true for private subnet internet access
+
+# =============================================================================
+# EKS CLUSTER CONFIGURATION
+# =============================================================================
+
+# Kubernetes version (check AWS documentation for latest stable version)
+cluster_version = "1.30"
+
+# Cluster endpoint access (SECURITY)
+# For production, restrict public access to specific CIDRs
+cluster_endpoint_private_access = true
+cluster_endpoint_public_access  = true
+cluster_endpoint_public_access_cidrs = [
+  "YOUR_OFFICE_IP/32",      # Replace with your office IP
+  "YOUR_VPN_CIDR/24"        # Replace with your VPN CIDR
+  # "0.0.0.0/0"             # WARNING: Only for testing!
+]
+
+# Cluster logging (for debugging and audit)
+cluster_enabled_log_types = [
+  "api",
+  "audit",
+  "authenticator",
+  "controllerManager",
+  "scheduler"
+]
+
+# =============================================================================
+# NODE GROUP CONFIGURATION
+# =============================================================================
+
+# Node group configuration for system workloads
+node_groups = {
+  system = {
+    # Sizing (adjust based on workload)
+    desired_size = 3  # Production: 3, Dev: 1-2
+    min_size     = 2  # Production: 2, Dev: 1
+    max_size     = 5  # Allow scaling up
+    
+    # Instance configuration (COST OPTIMIZATION)
+    instance_types = ["t3.medium", "t3a.medium"]  # Multiple types for flexibility
+    capacity_type  = "ON_DEMAND"  # Use ON_DEMAND for system nodes
+    
+    # Storage
+    disk_size = 50  # GB, adjust based on your container image sizes
+    
+    # Labels for pod scheduling
+    labels = {
+      role = "system"
+      node-type = "managed"
+    }
+    
+    # Taints (optional - uncomment to dedicate nodes to system workloads)
+    # taints = [
+    #   {
+    #     key    = "system-only"
+    #     value  = "true"
+    #     effect = "NO_SCHEDULE"
+    #   }
+    # ]
+    
+    tags = {
+      Environment = "production"
+      Type        = "system"
+    }
+  },
+  
+  # Additional node group for applications (optional)
+  # application = {
+  #   desired_size = 2
+  #   min_size     = 1
+  #   max_size     = 10
+  #   
+  #   instance_types = ["m5.large", "m5a.large"]
+  #   capacity_type  = "SPOT"  # Use SPOT for cost savings
+  #   
+  #   disk_size = 100
+  #   
+  #   labels = {
+  #     role = "application"
+  #     node-type = "spot"
+  #   }
+  #   
+  #   tags = {
+  #     Environment = "production"
+  #     Type        = "application"
+  #   }
+  # }
+}
+
+# =============================================================================
+# KARPENTER CONFIGURATION (AUTO-SCALING)
+# =============================================================================
+
+# Enable Karpenter for intelligent node provisioning
+enable_karpenter = true
+karpenter_version = "0.16.3"
+
+# Karpenter instance configuration
+karpenter_instance_types = [
+  "t3.medium",
+  "t3.large",
+  "t3a.medium",
+  "t3a.large",
+  "m5.large",
+  "m5a.large"
+]
+
+# Maximum resources Karpenter can provision
+karpenter_limits = {
+  cpu    = "1000"     # Maximum vCPUs
+  memory = "1000Gi"   # Maximum memory
+}
+
+# =============================================================================
+# ADD-ONS CONFIGURATION
+# =============================================================================
+
+# AWS Load Balancer Controller (for ALB/NLB)
+enable_aws_load_balancer_controller = true
+aws_load_balancer_controller_version = "2.8.2"
+
+# EBS CSI Driver (for persistent volumes)
+enable_ebs_csi_driver = true
+ebs_csi_driver_version = "1.20.0"
+
+# Metrics Server (for HPA and resource monitoring)
+enable_metrics_server = true
+metrics_server_version = "0.6.4"
+
+# Cert Manager (for TLS certificates)
+enable_cert_manager = true
+cert_manager_version = "1.16.2"
+
+# ArgoCD (for GitOps)
+enable_argocd = false  # Set to true if using GitOps
+argocd_version = "5.46.0"
+
+# =============================================================================
+# IAM AND SECURITY
+# =============================================================================
+
+# Enable IRSA (IAM Roles for Service Accounts)
+enable_irsa = true
+
+# KMS key for secrets encryption (optional)
+# kms_key_id = "arn:aws:kms:region:account:key/xxx"
+
+# Pod Security Standards (optional)
+enable_pod_security_policy = false  # Deprecated, use Pod Security Standards
+pod_security_standards = "restricted"  # Options: privileged, baseline, restricted
+
+# =============================================================================
+# BACKUP AND DISASTER RECOVERY
+# =============================================================================
+
+# Enable cluster backup (using Velero)
+enable_backup = false  # Set to true for production
+backup_schedule = "0 2 * * *"  # Daily at 2 AM
+backup_retention_days = 30
+
+# =============================================================================
+# MONITORING AND OBSERVABILITY
+# =============================================================================
+
+# Prometheus and Grafana
+enable_prometheus = false  # Set to true for production
+enable_grafana = false     # Set to true for production
+
+# CloudWatch Container Insights
+enable_container_insights = true
+container_insights_retention_days = 7
+
+# =============================================================================
+# COST ALLOCATION TAGS
+# =============================================================================
+
+# Tags applied to all resources (customize for your organization)
+tags = {
+  # Mandatory tags for cost allocation
+  Environment = "production"
+  Project     = "eks-platform"
+  Team        = "platform-engineering"
+  Owner       = "platform-team@acme.com"
+  CostCenter  = "engineering"
+  
+  # Technical tags
+  ManagedBy   = "terraform"
+  Repository  = "https://github.com/acme/eks-terraform"
+  
+  # Compliance tags (if required)
+  DataClass   = "internal"
+  Compliance  = "pci-dss"  # If applicable
+  
+  # Automation tags
+  BackupPolicy     = "daily"
+  MaintenanceWindow = "sun:03:00-sun:05:00"
+  AutoShutdown     = "false"  # Set to true for dev environments
+}
+
+# =============================================================================
+# COST OPTIMIZATION SETTINGS
+# =============================================================================
+
+# Spot instance configuration
+spot_instance_pools = 4  # Number of spot pools to diversify
+spot_max_price = ""      # Empty = up to on-demand price
+
+# Auto-scaling configuration
+enable_cluster_autoscaler = false  # Use Karpenter instead
+enable_horizontal_pod_autoscaler = true
+enable_vertical_pod_autoscaler = false  # Enable with caution
+
+# Resource quotas (optional)
+enable_resource_quotas = true
+default_resource_quota = {
+  requests_cpu    = "100"
+  requests_memory = "200Gi"
+  limits_cpu      = "200"
+  limits_memory   = "400Gi"
+}
+
+# =============================================================================
+# MAINTENANCE WINDOW
+# =============================================================================
+
+# Define when automatic updates can occur
+maintenance_window = {
+  enabled = true
+  day     = "sunday"
+  hour    = 3  # 3 AM
+  duration = 4  # hours
+}

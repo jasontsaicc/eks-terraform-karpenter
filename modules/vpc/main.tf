@@ -165,15 +165,13 @@ resource "aws_route_table" "private" {
 }
 
 # Private Routes
-# Commented out due to route already existing in AWS
-# This route is created automatically when NAT Gateway is attached
-# resource "aws_route" "private_nat" {
-#   count = var.enable_nat_gateway ? (var.single_nat_gateway ? 1 : length(var.azs)) : 0
-#
-#   route_table_id         = aws_route_table.private[count.index].id
-#   destination_cidr_block = "0.0.0.0/0"
-#   nat_gateway_id         = aws_nat_gateway.main[count.index].id
-# }
+resource "aws_route" "private_nat" {
+  count = var.enable_nat_gateway ? (var.single_nat_gateway ? 1 : length(var.azs)) : 0
+
+  route_table_id         = aws_route_table.private[count.index].id
+  destination_cidr_block = "0.0.0.0/0"
+  nat_gateway_id         = aws_nat_gateway.main[var.single_nat_gateway ? 0 : count.index].id
+}
 
 # Private Route Table Associations
 resource "aws_route_table_association" "private" {

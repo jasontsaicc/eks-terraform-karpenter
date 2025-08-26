@@ -201,8 +201,8 @@ spec:
 EOF
     
     log_info "Karpenter 配置已準備，使用以下命令安裝："
-    echo "helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version v0.31.0 \\"
-    echo "  --namespace karpenter \\"
+    echo "helm upgrade --install karpenter oci://public.ecr.aws/karpenter/karpenter --version \"1.0.6\" \\"
+    echo "  --namespace kube-system \\"
     echo "  --set serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn=$(terraform output -raw karpenter_controller_role_arn) \\"
     echo "  --set settings.aws.clusterName=$CLUSTER_NAME \\"
     echo "  --set settings.aws.defaultInstanceProfile=$(terraform output -raw karpenter_instance_profile_name) \\"

@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: karpenter-scale-test
+  namespace: default
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: karpenter-scale-test
+  template:
+    metadata:
+      labels:
+        app: karpenter-scale-test
+    spec:
+      nodeSelector:
+        nodepool: general-purpose  # 匹配 NodePool 的標籤
+      tolerations:
+        - key: karpenter.sh/nodepool
+          value: general-purpose
+          effect: NoSchedule
+      containers:
+      - name: nginx
+        image: nginx:latest
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "500m"
+            memory: "1Gi"

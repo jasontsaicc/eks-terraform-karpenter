@@ -1,0 +1,107 @@
+# GitLab Runner Helm Chart 配置
+# 此配置適用於 EKS 環境
+
+# GitLab Runner 映像配置
+image: gitlab/gitlab-runner:alpine-v16.11.1
+
+# 副本數
+replicas: 2
+
+# GitLab Runner 配置
+gitlabUrl: https://gitlab.com/  # 如果使用自架 GitLab，請修改此 URL
+
+# Runner registration token (需要從 GitLab 獲取)
+# runnerRegistrationToken: "your-registration-token-here"
+
+# Runner 標籤和描述
+runners:
+  config: |
+    [[runners]]
+      [runners.kubernetes]
+        namespace = "gitlab-runner"
+        image = "ubuntu:22.04"
+        
+        # 資源限制
+        cpu_limit = "1000m"
+        memory_limit = "2Gi"
+        service_cpu_limit = "500m"
+        service_memory_limit = "512Mi"
+        helper_cpu_limit = "100m"
+        helper_memory_limit = "128Mi"
+        
+        # 存儲配置
+        [runners.kubernetes.volumes]
+          
+        [[runners.kubernetes.volumes.empty_dir]]
+          name = "docker-certs"
+          mount_path = "/certs/client"
+          medium = "Memory"
+
+  # Runner 標籤
+  tags: "kubernetes,docker,eks,aws"
+  
+  # Runner 名稱
+  name: "eks-runner"
+  
+  # 並行作業數
+  concurrent: 10
+  
+  # 檢查間隔
+  checkInterval: 30
+
+# 資源配置
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+# 節點選擇器 (可選)
+nodeSelector: {}
+
+# 容忍度 (可選)
+tolerations: []
+
+# 親和性 (可選)  
+affinity: {}
+
+# 服務帳戶
+serviceAccount:
+  create: true
+  name: gitlab-runner
+
+# RBAC 配置
+rbac:
+  create: true
+  rules:
+    - resources: ["configmaps", "pods", "pods/attach", "secrets", "services"]
+      verbs: ["get", "list", "watch", "create", "patch", "update", "delete"]
+    - resources: ["pods/exec"]
+      verbs: ["create", "patch", "delete"]
+
+# 安全配置
+securityContext:
+  fsGroup: 65533
+  runAsUser: 100
+
+# Pod 註解
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9252"
+  prometheus.io/path: "/metrics"
+
+# 監控配置
+metrics:
+  enabled: true
+
+# 日誌級別
+logLevel: info
+
+# 環境變數
+envVars:
+  - name: RUNNER_EXECUTOR
+    value: "kubernetes"
+  - name: KUBERNETES_NAMESPACE
+    value: "gitlab-runner"

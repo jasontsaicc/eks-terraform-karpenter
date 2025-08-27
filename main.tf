@@ -51,13 +51,13 @@ module "vpc" {
   tags              = var.tags
 }
 
-# Phase 2: IAM roles
+# Phase 2: IAM roles (base roles only)
 module "iam" {
   source = "./modules/iam"
 
   cluster_name                        = local.cluster_name
   enable_irsa                         = var.enable_irsa
-  cluster_oidc_issuer_url            = try(aws_eks_cluster.main.identity[0].oidc[0].issuer, "")
+  cluster_oidc_issuer_url            = aws_eks_cluster.main.identity[0].oidc[0].issuer
   enable_karpenter                    = var.enable_karpenter
   enable_aws_load_balancer_controller = var.enable_aws_load_balancer_controller
   enable_ebs_csi_driver              = var.enable_ebs_csi_driver

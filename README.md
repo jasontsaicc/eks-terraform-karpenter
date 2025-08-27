@@ -1,6 +1,25 @@
 # AWS EKS Terraform 基礎設施
 
-這是一個完整的 AWS EKS 集群 Terraform 配置，專為測試環境設計，支援 GitLab、ArgoCD 和 Karpenter。
+這是一個完整的 AWS EKS 集群 Terraform 配置，已成功部署並測試，包含完整的運維腳本和文檔。
+
+## 📊 當前狀態
+- ✅ **EKS v1.30** - 2節點集群運行正常  
+- ✅ **AWS Load Balancer Controller** - 負載均衡正常  
+- ✅ **Metrics Server** - 資源監控正常  
+- 🟡 **Karpenter** - 需要配置調整  
+- 📚 **完整文檔** - 490行部署指南和狀態報告  
+
+## 🗂️ 項目結構
+```
+📁 configs/current/          # 當前配置文件
+📁 docs/current/            # 最新文檔 (部署指南 + 狀態報告)
+📁 scripts/                 # 運維腳本
+📁 modules/                 # Terraform 模組
+📁 tests/current/           # 測試文件
+📁 archived/                # 歷史歸檔
+```
+
+詳細結構請參考: [PROJECT-STRUCTURE.md](./PROJECT-STRUCTURE.md)
 
 ## 🏗️ 架構概覽
 
@@ -76,49 +95,30 @@
 
 ## 🚀 快速開始
 
-### 1. 複製專案
+### 方法1: 一鍵部署 (推薦)
 ```bash
-git clone <repository-url>
-cd aws_eks_terraform
+# 使用自動化腳本一鍵部署
+./quick-deploy.sh
 ```
 
-### 2. 配置 AWS 認證
+### 方法2: 手動部署
 ```bash
-aws configure
-# 或使用環境變數
-export AWS_ACCESS_KEY_ID="your-access-key"
-export AWS_SECRET_ACCESS_KEY="your-secret-key"
-export AWS_DEFAULT_REGION="ap-east-1"
+# 1. 配置環境
+cp configs/current/terraform.tfvars.simple configs/current/terraform.tfvars
+vi configs/current/terraform.tfvars  # 編輯配置
+
+# 2. 初始化和部署
+terraform init -backend-config=configs/current/backend-config.hcl
+terraform apply -auto-approve
+
+# 3. 配置 kubectl
+aws eks update-kubeconfig --region ap-southeast-1 --name eks-lab-test-eks
+export KUBECONFIG=~/.kube/config-eks
 ```
 
-### 3. 自訂配置
-編輯 `environments/test/terraform.tfvars`：
-```hcl
-project_name = "your-project"
-region       = "ap-east-1"
-vpc_cidr     = "10.0.0.0/16"
-
-# 根據需求調整節點配置
-node_instance_types = ["t3.medium"]
-node_capacity_type  = "SPOT"
-```
-
-### 4. 部署基礎設施
-```bash
-# 使用自動化腳本
-./scripts/deploy.sh
-
-# 或手動部署
-terraform init
-terraform plan -var-file=environments/test/terraform.tfvars
-terraform apply -var-file=environments/test/terraform.tfvars
-```
-
-### 5. 配置 kubectl
-```bash
-aws eks --region ap-east-1 update-kubeconfig --name <cluster-name>
-kubectl get nodes
-```
+### 📚 詳細指南
+完整部署步驟請參考: [`docs/current/EKS-DEPLOYMENT-GUIDE.md`](docs/current/EKS-DEPLOYMENT-GUIDE.md)  
+系統狀態報告請參考: [`docs/current/SYSTEM-STATUS-REPORT.md`](docs/current/SYSTEM-STATUS-REPORT.md)
 
 ## 🔧 附加元件安裝
 
@@ -287,14 +287,15 @@ aws eks update-addon --cluster-name <cluster-name> --addon-name vpc-cni --addon-
 ## 🧹 清理資源
 
 ```bash
-# 使用自動化腳本
-./scripts/destroy.sh
+# 標準清理
+terraform destroy -auto-approve
 
-# 或手動清理
-terraform destroy -var-file=environments/test/terraform.tfvars
+# 強制清理 (如果 Terraform 失敗)
+./scripts/force-cleanup.sh
 ```
 
-⚠️ **警告**: 清理操作將刪除所有資源，請確保已備份重要資料。
+⚠️ **警告**: 清理操作將刪除所有 AWS 資源，請確保已備份重要資料。  
+💡 **提示**: `force-cleanup.sh` 可處理 Terraform 無法清理的資源。
 
 ## 🤝 貢獻指南
 
